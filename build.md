@@ -152,6 +152,7 @@ Base URL: `http://localhost:8000`. Internal writes are direct DB calls — no en
 
 - **`audio_chunk`** `{type, data: "<base64 PCM16 24k mono>"}` — every ~100 ms. Forwarded to the Realtime session as `input_audio_buffer.append`. **Gated:** not sent while agent audio is playing (echo control).
 - **`video_frame`** `{type, data: "<base64 JPEG>", timestamp}` — every 3 s.
+- **`local_sentiment`** `{type, kind: "face"|"voice", valence: -1..1, scores}` — browser-side multimodal signals: face-api.js facial expressions (~2.5 Hz) and Transformers.js voice-tone emotion (~3 s windows), both running locally in the browser. Voice capture is gated on the echo control so the agent's own voice never colours the reading. Merged into the server's sentiment state as `face_valence` / `voice_valence`.
 
 ### Backend → browser
 
@@ -161,7 +162,8 @@ Base URL: `http://localhost:8000`. Internal writes are direct DB calls — no en
 - **`agent_speaking`** `{type, value: true|false}` — `true` with the first audio chunk of a response, `false` when the response's audio has fully streamed. Frontend mutes the mic while `true` **or** while audio is still playing locally.
 - **`agent_text`** `{type, text}` — incremental agent transcript (from output-audio transcript deltas); the speech bubble updates as it speaks.
 - **`agent_audio`** `{type, audio_b64: "<base64 PCM16 24k>"}` — streamed chunks, played via Web Audio as they arrive (queued back-to-back, no gaps).
-- **`sentiment_update`** `{type, engagement: 0-10, trust_signal: 0-1, emotion, eye_contact, posture, objection_risk: 0-1}` — per analyzed frame (~3 s). **Fixed scale mapping:** Engagement bar = `engagement*10`%, Trust = `trust_signal*100`%, Objection risk = `objection_risk*100`%.
+- **`sentiment_update`** `{type, engagement: 0-10, trust_signal: 0-1, emotion, eye_contact, posture, objection_risk: 0-1, face_valence: -1..1|null, voice_valence: -1..1|null}` — emitted per analyzed vision frame (~3 s) and per local-sentiment sample. **Fixed scale mapping:** Engagement bar = `engagement*10`%, Trust = `trust_signal*100`%, Objection risk = `objection_risk*100`%, valences = `(v+1)/2*100`%.
+- **`agent_ended_call`** `{type, outcome: "converted"|"follow_up"|"lost", summary}` — the agent hung up via its `end_call` function tool (registered on the Realtime session; outcomes `deal_closed→converted`, `next_step_agreed→follow_up`, else `lost`). Sent after the closing line finishes streaming; the frontend then calls `POST /calls/:id/end` with that outcome.
 - **`flag`** `{type, severity, message, timestamp: "02:08", turn_id: "<uuid>|null"}` — `turn_id` set when the flag refers to a specific turn (e.g. the objection flags), so the transcript can mark that row.
 
 > No `optimization_ready` WS event: the call WS is always closed by the time the post-call task finishes (End call navigates to the Report). The Report polls `GET /calls/:callId/optimization`.
@@ -344,6 +346,7 @@ Return ONLY valid JSON:
 | `engagement ≤ 3` ×2 consecutive frames | "Engagement dropping — shorten next response" |
 | Prospect turn has "think about it"/"not sure"/"maybe" and next agent turn lacks a reframe keyword | "Objection raised — agent gave no reframe" |
 | Same, but agent turn **has** a reframe keyword | ✓ "Objection detected — agent reframed with scarcity/social proof" (severity: ok) |
+| `voice_valence ≤ -0.4` ×2 consecutive samples | "Negative vocal tone — frustration in voice" |
 
 Each flag type rate-limited to once per 15 s. Reframe keywords: `scarcity, neighbours, social proof, limited, slots, this week, no-obligation` + brand terms.
 
@@ -364,6 +367,11 @@ Each flag type rate-limited to once per 15 s. Reframe keywords: `scarcity, neigh
 │   ├── call_loop.py         — per-call orchestration (state keyed by call_id)
 │   ├── post_call.py         — scoring, diagnosis, optimization gen, lift update
 │   ├── seed.py              — seeded analytics dataset (<5 real calls)
+│   ├── optimizer/           — Overmind *optimizer* harness (offline loop)
+│   │   ├── sim_agent.py     — run() entrypoint: simulated call vs role-played prospect
+│   │   ├── build_dataset.py — scenarios rebuilt from real calls in overmind.db
+│   │   ├── eval_spec.json / policies.md
+│   │   └── apply_prompt.py  — ships a winning prompt back via a normal optimization row
 │   └── requirements.txt
 ├── frontend/
 │   ├── public/pcm-worklet.js — AudioWorklet: mic Float32 → 24 kHz PCM16

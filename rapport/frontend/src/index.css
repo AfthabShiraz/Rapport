@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* ── Antler theme ─────────────────────────────────────────────
+   Warm cream surfaces · near-black warm ink · signature coral.
+   Clean, editorial, modern. */
+@theme {
+  /* surfaces */
+  --color-cream: #f5efe7;
+  --color-cream-deep: #ede4d7;
+  --color-surface: #fffefc;
+  --color-night: #161310;
+
+  /* ink */
+  --color-ink: #1a1613;
+  --color-ink-soft: #6f665b;
+  --color-ink-faint: #a39a8c;
+
+  /* lines */
+  --color-line: #e7ddcd;
+  --color-line-strong: #d8cdb9;
+
+  /* brand — Antler coral */
+  --color-coral: #ff5436;
+  --color-coral-dark: #e8421f;
+  --color-coral-soft: #ffe8e1;
+  --color-coral-ink: #b8341a;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --shadow-card: 0 1px 2px rgba(26, 22, 19, 0.04), 0 1px 3px rgba(26, 22, 19, 0.03);
+  --shadow-lift: 0 4px 16px rgba(26, 22, 19, 0.06), 0 1px 2px rgba(26, 22, 19, 0.04);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-cream text-ink antialiased;
+  font-feature-settings: 'cv01', 'cv03', 'ss01';
+  letter-spacing: -0.011em;
+}
+
+/* tighten display headings, editorial feel */
+h1, h2 {
+  letter-spacing: -0.02em;
+}
+
+/* warm, slim scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}

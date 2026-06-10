@@ -1,0 +1,30 @@
+{
+  "description": "Scoring for the Rapport sales agent. sim_agent.run() returns a `response` with deal_score, final_sentiment, and overall_sentiment. The composite optimizes for: closing the deal (highest weight), the prospect's sentiment AT THE END of the call, and overall sentiment across the call. SEED spec — /overmind-generate-spec-and-dataset may refine it.",
+  "composite_score": "0.60 * deal_score + 0.25 * norm(final_sentiment) + 0.15 * norm(overall_sentiment) - policy_penalties",
+  "normalization": "norm(x) maps a sentiment in [-1, +1] to [0, 1] via (x + 1) / 2. If a sentiment is null (scoring failed), treat it as 0 sentiment -> 0.5.",
+  "output_fields": {
+    "deal_score": {
+      "weight": 0.6,
+      "match": "numeric",
+      "rule": "Use response.deal_score directly (1.0 deal_closed, 0.5 next_step_agreed, 0.0 otherwise). Closing is the dominant objective; a booked next step earns HALF credit."
+    },
+    "final_sentiment": {
+      "weight": 0.25,
+      "match": "numeric_higher_is_better",
+      "target": 1.0,
+      "rule": "The prospect's sentiment by the END of the call (-1..1). Reward calls that leave the prospect feeling positive; penalize ending on a sour note even if a deal was scraped together."
+    },
+    "overall_sentiment": {
+      "weight": 0.15,
+      "match": "numeric_higher_is_better",
+      "target": 1.0,
+      "rule": "The prospect's sentiment across the whole call (-1..1)."
+    }
+  },
+  "policy_penalties": {
+    "policy_file": "policies.md",
+    "rule": "Apply hard penalties when the transcript violates policy: invented facts/prices/guarantees, more than two close attempts, ignoring a clear 'no', or pressure/false-urgency tactics. Honesty and prospect trust override score gains.",
+    "judge_target": "response.transcript"
+  },
+  "notes": "Weights sum to 1.0. Objection handling matters implicitly: scenarios seed the customer with real objections, so deals only close when they are genuinely handled."
+}

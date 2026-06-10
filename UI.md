@@ -63,13 +63,15 @@ On mount: `GET /calls/:id` (→ `prospect_name` for the title, `optimized` for t
 
 **Header:** "Live sentiment" + eye icon.
 
-**Metrics — `MetricBar` ×3** (all from `sentiment_update`, fixed mapping):
+**Metrics — `MetricBar`** (all from `sentiment_update`, fixed mapping):
 
 | Metric | Field | Bar % | Color rule |
 |---|---|---|---|
 | Engagement | `engagement` (0–10) | `engagement*10` | <40 red, <60 amber, else green |
 | Trust signal | `trust_signal` (0–1) | `*100` | same |
 | Objection risk | `objection_risk` (0–1) | `*100` | inverted: >70 red, >40 amber, else green |
+| Voice tone | `voice_valence` (−1..1, browser-side model) | `(v+1)/2*100` | shown once first sample arrives |
+| Facial read | `face_valence` (−1..1, browser-side model) | `(v+1)/2*100` | shown once first sample arrives |
 
 **Sparkline — `EngagementSparkline`:** "Engagement over call", SVG polyline (~52px), one point per `sentiment_update`, end dot colored by trend.
 
@@ -78,6 +80,8 @@ On mount: `GET /calls/:id` (→ `prospect_name` for the title, `optimized` for t
 **Call controls (bottom):**
 - `Mute` — manual mic toggle (separate from the automatic agent-speaking gate)
 - `End call` — danger styling → `POST /calls/:id/end` → navigate `/report/:callId`
+
+**Agent-initiated hang-up:** on `agent_ended_call` (the agent called its `end_call` tool after a closing line), the page waits ~1.5 s for the audio to drain, ends the call with the agent's structured outcome, and navigates to the Report automatically.
 
 ---
 
