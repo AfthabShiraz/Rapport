@@ -21,8 +21,13 @@ let pipeline = null;   // set once Transformers.js loads
 
 // --- config (swap model ids here if one 404s on the hub) ----------------- //
 const FACE_MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model";
-const VOICE_MODEL = "Xenova/wav2vec2-base-superb-er"; // 4 emotions: hap/sad/ang/neu
-const TEXT_MODEL = "Xenova/distilbert-base-uncased-finetuned-sst-2-english";
+// Speech-emotion model that actually exists as ONNX for Transformers.js and ships
+// model_quantized.onnx (the file v2 loads by default). Labels: SAD/ANGRY/DISGUST/
+// FEAR/HAPPY/NEUTRAL. (The previous Xenova/wav2vec2-base-superb-er id did NOT exist
+// on the hub, which is why voice produced 0 samples.)
+const VOICE_MODEL = "onnx-community/wav2vec2-base-Speech_Emotion_Recognition-ONNX";
+// NOTE: live text sentiment is intentionally OFF — language/content sentiment is
+// now done post-call by the Azure LLM (more accurate; gets sarcasm/frustration).
 
 const FACE_INTERVAL_MS = 400;   // webcam sampling cadence
 const VOICE_WINDOW_S = 3;       // seconds of audio per voice inference
@@ -59,10 +64,10 @@ function labelValence(scores) { // robust to label spelling across models
   return clamp(pos - neg);
 }
 function fused() {
+  // Live overall = face + voice (language sentiment is computed post-call).
   const parts = [];
-  if (latest.text) parts.push([0.40, latest.text.valence]);
-  if (latest.face) parts.push([0.35, latest.face.valence]);
-  if (latest.voice) parts.push([0.25, latest.voice.valence]);
+  if (latest.face) parts.push([0.5, latest.face.valence]);
+  if (latest.voice) parts.push([0.5, latest.voice.valence]);
   if (!parts.length) return null;
   const w = parts.reduce((a, [k]) => a + k, 0);
   return clamp(parts.reduce((a, [k, v]) => a + k * v, 0) / w);
@@ -102,13 +107,11 @@ async function loadModels() {
   }
 
   if (pipeline) {
-    try { textPipe = await pipeline("sentiment-analysis", TEXT_MODEL); textReady = true; }
-    catch (e) { console.warn("text model failed", e); }
     try { voicePipe = await pipeline("audio-classification", VOICE_MODEL); voiceReady = true; }
-    catch (e) { console.warn("voice model failed (continuing without it)", e); }
+    catch (e) { console.warn("voice model failed (continuing without it)", e); setStatus("Voice model failed: " + e.message); }
   }
 
-  const on = [faceReady && "face", textReady && "text", voiceReady && "voice"].filter(Boolean);
+  const on = [faceReady && "face", voiceReady && "voice"].filter(Boolean);
   if (on.length) setStatus(`Sentiment ready: ${on.join(" · ")}`);
   else setStatus("Sentiment models failed to load — see console for details.");
 }
@@ -210,7 +213,7 @@ function renderLive() {
     els.readouts.innerHTML =
       bar("Face", latest.face ? latest.face.valence : null, latest.face ? dominant(latest.face.scores) : "") +
       bar("Voice", latest.voice ? latest.voice.valence : null, latest.voice ? dominant(latest.voice.scores) : "") +
-      bar("Text", latest.text ? latest.text.valence : null, latest.text ? dominant(latest.text.scores) : "");
+      `<div class="srow"><span>Text / language</span><span>computed post-call (LLM)</span></div>`;
   }
   drawTimeline();
 }

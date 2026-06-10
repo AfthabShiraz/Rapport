@@ -26,6 +26,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import analysis
+from sales_agent import build_instructions, END_CALL_TOOL
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -66,90 +69,9 @@ class Campaign(BaseModel):
     goal: str = Field(default="")         # the objective for THIS call (set in the UI)
 
 
-def build_instructions(c: Campaign) -> str:
-    """Turn the campaign fields into the agent's system prompt."""
-    return f"""\
-You are a friendly, sharp outbound sales representative for {c.brand or "the company"}.
-You are placing a live phone call to a prospective customer. You speak FIRST.
-
-=== YOUR GOAL FOR THIS CALL (what you are optimizing for) ===
-PRIMARY OBJECTIVE: {c.goal.strip() or "Close the deal — get the customer to buy / sign up / start today."}
-This is the single thing you are steering every turn toward — get an explicit YES /
-commitment to the objective above. If a full commitment truly isn't reachable today,
-the acceptable fallback is a concrete, scheduled next step that moves toward it (a
-booked time, a confirmed demo, a follow-up on a set date) — but push gently for the
-commitment first before settling for the fallback.
-
-=== WHAT YOU SELL ===
-Brand: {c.brand or "(unspecified)"}
-Product: {c.product or "(unspecified)"}
-Elevator pitch: {c.pitch or "(unspecified)"}
-
-=== WHO YOU ARE TALKING TO ===
-Target persona: {c.persona or "(unspecified)"}
-What we know about this specific customer: {c.customer or "(nothing yet)"}
-
-=== CALL STRUCTURE (move through these, don't get stuck) ===
-1. OPEN / HOOK — warm, quick intro of you + the brand; a one-line hook tailored to
-   what we know about the customer. Earn a few seconds of attention.
-2. DISCOVERY — ask 1–2 sharp questions to surface this person's goal or pain. Listen.
-3. PITCH — tie the product's value directly to what they just told you and to the
-   persona's likely priorities. Keep it tight.
-4. OBJECTIONS — address concerns honestly and specifically; don't steamroll or repeat.
-5. CLOSE — explicitly ask for the commitment ("shall we get you started today?").
-   If they hesitate, handle the objection and ask again, then fall back to a next step.
-
-=== TIMING ===
-- Aim to wrap the call in about 2 minutes. Be efficient and always be moving toward
-  the close — no rambling, one idea per turn, short sentences.
-- This is a soft target, not a hard cutoff: closing the deal takes priority over the
-  clock. Don't end abruptly just because ~2 minutes passed if you're near a yes.
-
-=== ENDING THE CALL ===
-- The moment the deal is closed OR a clear next step is agreed, give a brief, warm
-  sign-off and then call the `end_call` function.
-- If the customer signals they want to stop (busy, not interested, "I have to go"),
-  make ONE concise attempt at a next step, then graciously wrap up and call `end_call`.
-- Always speak your closing line BEFORE calling `end_call`.
-
-=== STYLE & HONESTY ===
-- Sound human: warm, conversational, natural. Short sentences. One idea at a time.
-- Never invent facts, prices, or guarantees you weren't given. If you don't know,
-  say you'll follow up.
-
-Begin the call now with your opening line."""
-
-
-# Tool the agent uses to hang up when the call is genuinely done.
-END_CALL_TOOL = {
-    "type": "function",
-    "name": "end_call",
-    "description": (
-        "End the phone call. Call this only AFTER speaking a closing line, when the "
-        "deal is closed, a clear next step is agreed, or the customer wants to stop."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "outcome": {
-                "type": "string",
-                "enum": [
-                    "deal_closed",
-                    "next_step_agreed",
-                    "declined",
-                    "customer_ended",
-                    "other",
-                ],
-                "description": "How the call ended.",
-            },
-            "summary": {
-                "type": "string",
-                "description": "One short sentence summarizing the outcome.",
-            },
-        },
-        "required": ["outcome"],
-    },
-}
+# build_instructions() and END_CALL_TOOL now live in sales_agent.py (imported above)
+# so the live voice call and the Overmind-optimized simulation share ONE prompt.
+# Optimize the prompt in sales_agent.py and the live agent here improves with it.
 
 
 # --------------------------------------------------------------------------- #
@@ -185,7 +107,7 @@ def create_session(campaign: Campaign) -> JSONResponse:
     if not API_KEY:
         raise HTTPException(500, "AZURE_REALTIME_API_KEY is not configured (.env).")
 
-    instructions = build_instructions(campaign)
+    instructions = build_instructions(campaign.model_dump())
 
     session_config = {
         "session": {
@@ -254,12 +176,59 @@ class TranscriptPayload(BaseModel):
 
 @app.post("/transcript")
 def save_transcript(payload: TranscriptPayload) -> dict:
-    """Persist the finished call for the sentiment / Overmind step."""
+    """Persist the finished call, then run the post-call LLM sentiment analysis."""
+    data = payload.model_dump()
     slug = re.sub(r"[^a-z0-9]+", "-", (payload.campaign.brand or "call").lower()).strip("-")
-    fname = f"{int(time.time())}-{slug or 'call'}.json"
-    path = TRANSCRIPT_DIR / fname
-    path.write_text(json.dumps(payload.model_dump(), indent=2, ensure_ascii=False))
-    return {"saved": fname, "entries": len(payload.entries)}
+    stem = f"{int(time.time())}-{slug or 'call'}"
+    (TRANSCRIPT_DIR / f"{stem}.json").write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+    result = {"saved": f"{stem}.json", "entries": len(payload.entries)}
+
+    # Post-call language sentiment + overall score (best-effort: never fail the save).
+    try:
+        enriched = analysis.analyze_and_enrich(data)
+        (TRANSCRIPT_DIR / f"{stem}-analyzed.json").write_text(
+            json.dumps(enriched, indent=2, ensure_ascii=False)
+        )
+        result["analyzed"] = f"{stem}-analyzed.json"
+        result["overall_sentiment_score"] = enriched.get("overall_sentiment_score")
+        result["analysis"] = enriched.get("analysis")
+    except Exception as e:  # noqa: BLE001 — surface the reason, keep the saved transcript
+        result["analysis_error"] = str(e)
+
+    return result
+
+
+class AnalyzeRequest(BaseModel):
+    filename: str | None = None       # a file in transcripts/ (raw, not -analyzed)
+    transcript: dict | None = None    # or pass the transcript object directly
+
+
+@app.post("/analyze")
+def analyze_endpoint(req: AnalyzeRequest) -> JSONResponse:
+    """Re-run (or run) the post-call analysis on a saved transcript or a posted object."""
+    if req.transcript is not None:
+        data = req.transcript
+        stem = None
+    elif req.filename:
+        path = TRANSCRIPT_DIR / req.filename
+        if not path.is_file():
+            raise HTTPException(404, f"No such transcript: {req.filename}")
+        data = json.loads(path.read_text())
+        stem = path.stem.removesuffix("-analyzed")
+    else:
+        raise HTTPException(400, "Provide either 'filename' or 'transcript'.")
+
+    try:
+        enriched = analysis.analyze_and_enrich(data)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Analysis failed: {e}")
+
+    if stem:
+        (TRANSCRIPT_DIR / f"{stem}-analyzed.json").write_text(
+            json.dumps(enriched, indent=2, ensure_ascii=False)
+        )
+    return JSONResponse(enriched)
 
 
 # Static assets (served last so "/" above takes precedence).

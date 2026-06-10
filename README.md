@@ -78,10 +78,42 @@ save the transcript.
 `sentiment` is a real-time track captured during the call, each sample stamped
 with `t` on the **same `tSec` clock** as `entries` — so a transcript line and the
 customer's emotion during it line up directly. `kind` is `face` (webcam,
-face-api.js ~2.5 Hz), `voice` (mic prosody, wav2vec2 every ~3 s) or `text`
-(DistilBERT per utterance). `valence` is a single −1..+1 score; `scores` is the
-raw per-emotion breakdown — the signal the later step reads to find *what tanked
-the mood, and exactly when*.
+face-api.js ~2.5 Hz) or `voice` (mic prosody, wav2vec2 every ~3 s). `valence` is a
+single −1..+1 score; `scores` is the raw per-emotion breakdown. (Language/content
+sentiment is **not** in this live track — it's computed post-call by the LLM, see
+below, because a small in-browser text model mislabels neutral business speech.)
+
+## Post-call sentiment analysis (LLM)
+
+When a call is saved, the backend runs one Azure OpenAI chat pass over the
+transcript (`analysis.py`) and writes `<name>-analyzed.json` next to the raw file.
+It scores **every turn's** customer sentiment, finds the **key moments** where
+sentiment shifted and what triggered them, and produces one **overall score** —
+the number that feeds Overmind. The live face/voice track is summarised per turn
+and handed to the model as nonverbal evidence, so the language read is grounded in
+how the customer actually looked/sounded.
+
+The enriched file adds, per entry, `language_sentiment: { score, label, reason }`,
+plus top-level:
+
+```json
+"overall_sentiment_score": -0.42,
+"analysis": {
+  "overall": { "score": -0.42, "label": "slightly_negative", "call_health": 35,
+               "outcome": "declined", "summary": "…" },
+  "key_moments": [ { "tSec": 37.9, "agent_index": 8, "trigger": "long pitch",
+                     "shift": "patience → frustration", "fix": "…" } ],
+  "what_went_wrong": ["…"], "what_worked": ["…"]
+}
+```
+
+**Requires a chat deployment.** This uses the *same* Azure resource + key as the
+realtime agent, but a **standard chat model** (e.g. `gpt-4o`), which is a separate
+deployment. Create one in the Azure AI Foundry / portal, then set
+`AZURE_CHAT_DEPLOYMENT` in `.env` to its deployment name. Analysis is best-effort:
+if the deployment is missing, the call still saves and the response carries an
+`analysis_error` explaining why. Re-run analysis any time with
+`POST /analyze {"filename": "<name>.json"}`.
 
 `ended_by` is `"agent"` (hung up via `end_call`) or `"user"`. `call_outcome` is set
 only when the agent ended the call — a useful label for the sentiment phase.

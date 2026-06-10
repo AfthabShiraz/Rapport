@@ -121,8 +121,16 @@
     let pc = null, dc = null, micStream = null, audioEl = null;
     let callStartMs = 0;
     let entries = [];                 // [{role, text, tSec, at}]
-    let agentBuffer = "";             // accumulates streaming agent transcript
-    let agentMsgEl = null;            // live DOM node for the agent's current turn
+    // Agent transcript reveal: the Realtime API delivers transcript deltas in a
+    // burst (faster than the voice speaks), so instead of dumping them we reveal
+    // characters at a speaking cadence so the text streams roughly in sync with audio.
+    let agentEl = null;               // live DOM node for the agent's current turn
+    let agentFull = "";               // full text accumulated for the current turn
+    let agentShown = 0;               // chars revealed so far
+    let revealAcc = 0;                // fractional-character accumulator
+    let revealTimer = null;
+    let agentTurnDone = false;        // generation finished; drain then finalize
+    const SPEAK_CPS = 16;             // reveal rate ≈ natural speech (~160 wpm)
     let endedBy = "user";             // "agent" if the agent hangs up via end_call
     let callOutcome = null;           // {outcome, summary} from the end_call tool
     let pendingEnd = false;           // agent requested end; wait for goodbye to finish
@@ -148,6 +156,39 @@
       return body;
     }
 
+    // --- paced reveal of the agent's transcript (typewriter synced to speech) ---
+    function ensureReveal() {
+      if (revealTimer) return;
+      let last = performance.now();
+      revealTimer = setInterval(() => {
+        if (!agentEl) return;
+        const now = performance.now(), dt = (now - last) / 1000; last = now;
+        const backlog = agentFull.length - agentShown;
+        if (backlog > 0) {
+          // gentle catch-up if the text gets far ahead of what's revealed
+          const rate = SPEAK_CPS * (backlog > 120 ? 2.2 : backlog > 60 ? 1.5 : 1);
+          revealAcc += rate * dt;
+          const add = Math.floor(revealAcc);
+          if (add > 0) {
+            revealAcc -= add;
+            agentShown = Math.min(agentFull.length, agentShown + add);
+            agentEl.textContent = agentFull.slice(0, agentShown);
+            $("transcript").scrollTop = $("transcript").scrollHeight;
+          }
+        } else if (agentTurnDone) {
+          finalizeAgentTurn();   // fully revealed and the turn is over
+        }
+      }, 30);
+    }
+    function finalizeAgentTurn() {
+      if (revealTimer) { clearInterval(revealTimer); revealTimer = null; }
+      agentEl = null; agentFull = ""; agentShown = 0; revealAcc = 0; agentTurnDone = false;
+    }
+    function flushAgentNow() {           // snap to full text instantly (call end / new turn)
+      if (agentEl) agentEl.textContent = agentFull;
+      finalizeAgentTurn();
+    }
+
     function campaign() {
       return {
         goal: $("goal").value,
@@ -159,7 +200,7 @@
     async function startCall() {
       startBtn.disabled = true;
       setStatus("Requesting session token…");
-      $("transcript").innerHTML = ""; entries = []; agentBuffer = ""; agentMsgEl = null;
+      $("transcript").innerHTML = ""; entries = []; flushAgentNow();
       endedBy = "user"; callOutcome = null; pendingEnd = false; ending = false;
       window.RapportSentiment?.reset();
 
@@ -228,20 +269,25 @@
     function handleEvent(e) {
       switch (e.type) {
         case "response.output_audio_transcript.delta": {
-          // Agent speaking — stream into the current bubble.
-          if (!agentMsgEl) { agentMsgEl = addMsg("agent", "", elapsed()); agentBuffer = ""; }
-          agentBuffer += e.delta || "";
-          agentMsgEl.textContent = agentBuffer;
-          $("transcript").scrollTop = $("transcript").scrollHeight;
+          // Agent speaking — queue text; the reveal loop paces it to the voice.
+          if (!agentEl) {
+            if (revealTimer) flushAgentNow();   // safety: finish any prior turn
+            agentEl = addMsg("agent", "", elapsed());
+            agentFull = ""; agentShown = 0; revealAcc = 0; agentTurnDone = false;
+          }
+          agentFull += e.delta || "";
+          ensureReveal();
           break;
         }
         case "response.output_audio_transcript.done": {
-          const text = e.transcript || agentBuffer;
-          if (agentMsgEl) agentMsgEl.textContent = text;
-          else addMsg("agent", text, elapsed());
+          const text = e.transcript || agentFull;
+          if (!agentEl) agentEl = addMsg("agent", "", elapsed());   // no deltas arrived
+          agentFull = text;            // exact final text
+          agentTurnDone = true;        // let the reveal drain, then finalize
+          ensureReveal();
+          // Record the full text now (saving/sentiment shouldn't wait for the reveal).
           entries.push({ role: "agent", text, tSec: elapsed(), at: new Date().toISOString() });
           window.RapportSentiment?.noteUtterance("agent", text, elapsed());
-          agentMsgEl = null; agentBuffer = "";
           break;
         }
         case "conversation.item.input_audio_transcription.completed": {
@@ -304,7 +350,15 @@
           }),
         });
         const data = await r.json();
-        setStatus(`Saved ${data.saved} — ${data.entries} turns. Ready for sentiment analysis.`);
+        if (typeof data.overall_sentiment_score === "number") {
+          const s = data.overall_sentiment_score;
+          const o = data.analysis?.overall || {};
+          setStatus(`Saved ${data.saved}. Overall sentiment ${s >= 0 ? "+" : ""}${s.toFixed(2)} (${o.label || "?"}, health ${o.call_health ?? "?"}/100). Analysis → ${data.analyzed}`);
+        } else if (data.analysis_error) {
+          setStatus(`Saved ${data.saved} — ${data.entries} turns. Post-call analysis skipped: ${data.analysis_error}`);
+        } else {
+          setStatus(`Saved ${data.saved} — ${data.entries} turns.`);
+        }
       } catch (e) {
         setStatus("Could not save transcript: " + e.message);
       }
@@ -312,6 +366,7 @@
     }
 
     function cleanup() {
+      flushAgentNow();
       window.RapportSentiment?.stop();
       if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
       if (dc) { try { dc.close(); } catch {} dc = null; }

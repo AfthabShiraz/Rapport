@@ -1,0 +1,30 @@
+{
+  "description": "Scoring for the Rapport sales agent. sales_agent.run() returns a `response` with deal_score, final_sentiment, and overall_sentiment. The composite optimizes for: closing the deal (highest weight), the customer's sentiment AT THE END of the call, and overall sentiment across the call. This is a SEED spec — `/overmind-generate-spec-and-dataset` may refine it.",
+  "composite_score": "0.60 * deal_score + 0.25 * norm(final_sentiment) + 0.15 * norm(overall_sentiment)  - policy_penalties",
+  "normalization": "norm(x) maps a sentiment in [-1, +1] to [0, 1] via (x + 1) / 2. If a sentiment is null (scoring failed), treat it as 0 sentiment -> 0.5.",
+  "output_fields": {
+    "deal_score": {
+      "weight": 0.60,
+      "match": "numeric",
+      "rule": "Use response.deal_score directly (already 1.0 for deal_closed, 0.5 for next_step_agreed, 0.0 for declined/incomplete). Closing the deal is the dominant objective. next_step_agreed earns HALF credit."
+    },
+    "final_sentiment": {
+      "weight": 0.25,
+      "match": "numeric_higher_is_better",
+      "target": 1.0,
+      "rule": "The customer's sentiment by the END of the call (response.final_sentiment, -1..1). Reward calls that leave the customer feeling positive; penalize ending on a sour note even if a deal was scraped together."
+    },
+    "overall_sentiment": {
+      "weight": 0.15,
+      "match": "numeric_higher_is_better",
+      "target": 1.0,
+      "rule": "The customer's sentiment across the whole call (response.overall_sentiment, -1..1)."
+    }
+  },
+  "policy_penalties": {
+    "policy_file": "policies.md",
+    "rule": "Apply hard penalties (subtract from the composite) when the transcript violates policy: invented facts/prices/guarantees, more than two close attempts, ignoring a clear 'no', or pressure/false-urgency tactics. Honesty and customer trust override score gains.",
+    "judge_target": "response.transcript"
+  },
+  "notes": "Weights sum to 1.0 (deal 0.60 + final 0.25 + overall 0.15). deal_closed is weighted highest per product decision; ending sentiment matters more than the call average."
+}

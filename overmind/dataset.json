@@ -1,0 +1,47 @@
+[
+  {
+    "input": {
+      "goal": "Book a product demo",
+      "brand": "Morpheus",
+      "product": "ai associate for private markets",
+      "pitch": "automate your due diligence and reporting with ai so you can spend time speaking face to face with real customers",
+      "persona": "fund managers at asset managers",
+      "customer": "this is a fund manager at M&G that makes sustainability investments",
+      "customer_profile": "Skeptical and hard to win over. Object early with something like: \"Bye. Bye.\" Only commit if the rep genuinely earns it.",
+      "max_turns": 10
+    },
+    "expected_output": {
+      "outcome": "next_step_agreed"
+    }
+  },
+  {
+    "input": {
+      "goal": "Book a product demo",
+      "brand": "Morpheus",
+      "product": "ai associate for private markets",
+      "pitch": "automate your due diligence and reporting with ai so you can spend time speaking face to face with real customers",
+      "persona": "fund managers at asset managers",
+      "customer": "this is a fund manager at M&G that makes sustainability investments",
+      "customer_profile": "Skeptical and hard to win over. Only commit if the rep genuinely earns it.",
+      "max_turns": 10
+    },
+    "expected_output": {
+      "outcome": "next_step_agreed"
+    }
+  },
+  {
+    "input": {
+      "goal": "Book a product demo",
+      "brand": "morpheus",
+      "product": "ai private markets associate",
+      "pitch": "automates your due diligence",
+      "persona": "fund manager in sustainability at M&G",
+      "customer": "preivously worked at hsbc",
+      "customer_profile": "Skeptical and hard to win over. Object early with something like: \"Moistos.\" Only commit if the rep genuinely earns it.",
+      "max_turns": 10
+    },
+    "expected_output": {
+      "outcome": "next_step_agreed"
+    }
+  }
+]
