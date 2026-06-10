@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rapport — voice sales agent</title>
+  <style>
+    :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --txt:#e6e9ef; --muted:#8b93a5;
+            --accent:#5b8cff; --agent:#2a3550; --user:#243b2e; --danger:#ff5b6e; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+           background:var(--bg); color:var(--txt); }
+    .wrap { max-width:1100px; margin:0 auto; padding:24px; display:grid;
+            grid-template-columns:1fr 1fr; gap:20px; }
+    h1 { grid-column:1/-1; margin:0 0 4px; font-size:22px; }
+    .sub { grid-column:1/-1; color:var(--muted); margin:-4px 0 8px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; text-transform:uppercase; letter-spacing:.04em; }
+    input, textarea { width:100%; background:#0c0e13; color:var(--txt); border:1px solid var(--line);
+                      border-radius:8px; padding:10px; font:inherit; resize:vertical; }
+    textarea { min-height:64px; }
+    .row { display:flex; gap:10px; margin-top:16px; }
+    button { flex:1; border:none; border-radius:8px; padding:12px; font:inherit; font-weight:600; cursor:pointer; }
+    #start { background:var(--accent); color:#fff; }
+    #end { background:transparent; color:var(--danger); border:1px solid var(--danger); }
+    button:disabled { opacity:.4; cursor:not-allowed; }
+    #status { grid-column:1/-1; font-size:13px; color:var(--muted); min-height:18px; }
+    #transcript { height:520px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+    .msg { padding:8px 12px; border-radius:10px; max-width:88%; white-space:pre-wrap; }
+    .msg.agent { background:var(--agent); align-self:flex-start; }
+    .msg.user  { background:var(--user);  align-self:flex-end; }
+    .msg .meta { font-size:11px; color:var(--muted); margin-bottom:2px; }
+    .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#555; margin-right:6px; vertical-align:middle; }
+    .dot.live { background:#3ad36a; box-shadow:0 0 8px #3ad36a; }
+    .hint { color:var(--muted); font-size:12px; margin-top:8px; }
+    .sbar { height:8px; background:#0c0e13; border-radius:5px; overflow:hidden; margin:3px 0 10px; }
+    .sbar > i { display:block; height:100%; transition:width .15s linear; }
+    .srow { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); text-transform:capitalize; }
+    .big { font-size:36px; font-weight:700; line-height:1.1; }
+    #cam { background:#000; border-radius:8px; transform:scaleX(-1); }
+    .sentgrid { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }
+    .sentgrid > div { flex:1; min-width:240px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Rapport</h1>
+    <div class="sub">Give the agent its brief, then let it make a sales call to you.</div>
+
+    <!-- LEFT: campaign brief -->
+    <div class="panel">
+      <label for="goal">Call objective — what to optimise for</label>
+      <input id="goal" list="goalsuggestions" placeholder="e.g. Close the sale today" />
+      <datalist id="goalsuggestions">
+        <option value="Close the sale today"></option>
+        <option value="Book a product demo"></option>
+        <option value="Book an appointment / meeting"></option>
+        <option value="Start a free trial"></option>
+        <option value="Qualify the lead and schedule a follow-up"></option>
+      </datalist>
+
+      <label for="brand">Brand name</label>
+      <input id="brand" placeholder="e.g. Acme Analytics" />
+
+      <label for="product">Product</label>
+      <input id="product" placeholder="e.g. Realtime dashboards for ops teams" />
+
+      <label for="pitch">Elevator pitch</label>
+      <textarea id="pitch" placeholder="One or two sentences on the core value."></textarea>
+
+      <label for="persona">Target persona</label>
+      <textarea id="persona" placeholder="e.g. Head of Operations at a 50–200 person logistics company."></textarea>
+
+      <label for="customer">What we know about this customer</label>
+      <textarea id="customer" placeholder="Name, role, context, prior interactions, pain points…"></textarea>
+
+      <div class="row">
+        <button id="start">Start call</button>
+        <button id="end" disabled>End call</button>
+      </div>
+      <div class="hint">The agent speaks first. Talk back into your mic — it listens and responds.</div>
+    </div>
+
+    <!-- RIGHT: live transcript -->
+    <div class="panel">
+      <div style="margin-bottom:10px;"><span id="dot" class="dot"></span><span id="callstate">Idle</span></div>
+      <div id="transcript"></div>
+    </div>
+
+    <!-- FULL WIDTH: live sentiment -->
+    <div class="panel" id="sentpanel" style="grid-column:1/-1;">
+      <div style="margin-bottom:12px; font-weight:600;">Live sentiment</div>
+      <div class="sentgrid">
+        <div style="flex:0 0 auto; min-width:0;">
+          <video id="cam" autoplay muted playsinline width="240" height="180"></video>
+          <div id="sentstatus" class="hint">Loading sentiment models…</div>
+        </div>
+        <div>
+          <div id="fused"></div>
+          <div id="readouts" style="margin-top:12px;"></div>
+        </div>
+        <div>
+          <canvas id="senttimeline" width="440" height="170" style="width:100%; background:#0c0e13; border-radius:8px;"></canvas>
+          <div class="hint">
+            <span style="color:#e6e9ef;">▬ overall</span> ·
+            <span style="color:#4caf50;">▬ text</span> ·
+            <span style="color:#e91e63;">▬ face</span> ·
+            <span style="color:#2196f3;">▬ voice</span> · vs call time
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const startBtn = $("start"), endBtn = $("end");
+
+    let pc = null, dc = null, micStream = null, audioEl = null;
+    let callStartMs = 0;
+    let entries = [];                 // [{role, text, tSec, at}]
+    let agentBuffer = "";             // accumulates streaming agent transcript
+    let agentMsgEl = null;            // live DOM node for the agent's current turn
+    let endedBy = "user";             // "agent" if the agent hangs up via end_call
+    let callOutcome = null;           // {outcome, summary} from the end_call tool
+    let pendingEnd = false;           // agent requested end; wait for goodbye to finish
+    let ending = false;               // guard against double-end
+    let safetyTimer = null;           // runaway cap
+
+    const SAFETY_MS = 6 * 60 * 1000;  // hard backstop so a call can't run forever
+
+    function setStatus(m) { $("status").textContent = m; }
+    function elapsed() { return callStartMs ? +((Date.now() - callStartMs) / 1000).toFixed(2) : 0; }
+    window.callElapsed = elapsed;   // shared clock for the sentiment overlay (tSec alignment)
+    function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return `${m}:${String(s).padStart(2,"0")}`; }
+
+    function addMsg(role, text, tSec) {
+      const el = document.createElement("div");
+      el.className = `msg ${role}`;
+      el.innerHTML = `<div class="meta">${role === "agent" ? "Agent" : "You"} · ${fmt(tSec)}</div>`;
+      const body = document.createElement("div");
+      body.textContent = text;
+      el.appendChild(body);
+      $("transcript").appendChild(el);
+      $("transcript").scrollTop = $("transcript").scrollHeight;
+      return body;
+    }
+
+    function campaign() {
+      return {
+        goal: $("goal").value,
+        brand: $("brand").value, product: $("product").value, pitch: $("pitch").value,
+        persona: $("persona").value, customer: $("customer").value,
+      };
+    }
+
+    async function startCall() {
+      startBtn.disabled = true;
+      setStatus("Requesting session token…");
+      $("transcript").innerHTML = ""; entries = []; agentBuffer = ""; agentMsgEl = null;
+      endedBy = "user"; callOutcome = null; pendingEnd = false; ending = false;
+      window.RapportSentiment?.reset();
+
+      let sess;
+      try {
+        const r = await fetch("/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(campaign()),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        sess = await r.json();
+      } catch (e) {
+        setStatus("Session error: " + e.message); startBtn.disabled = false; return;
+      }
+
+      setStatus("Setting up microphone & WebRTC…");
+      pc = new RTCPeerConnection();
+
+      audioEl = document.createElement("audio");
+      audioEl.autoplay = true;
+      document.body.appendChild(audioEl);
+      pc.ontrack = (ev) => { if (ev.streams[0]) audioEl.srcObject = ev.streams[0]; };
+
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        pc.addTrack(micStream.getAudioTracks()[0]);
+      } catch (e) {
+        setStatus("Microphone denied: " + e.message); cleanup(); startBtn.disabled = false; return;
+      }
+
+      dc = pc.createDataChannel("realtime-channel");
+      dc.addEventListener("open", () => {
+        callStartMs = Date.now();
+        $("dot").classList.add("live"); $("callstate").textContent = "Live";
+        setStatus("Connected. The agent is opening the call…");
+        // Agent speaks first: instructions already tell it to greet & pitch.
+        dc.send(JSON.stringify({ type: "response.create" }));
+        window.RapportSentiment?.start(micStream);   // webcam + voice/text sentiment (off the call path)
+        endBtn.disabled = false;
+        safetyTimer = setTimeout(() => {
+          if (!ending) { setStatus("Reached the 6-minute safety cap — ending."); endCall(); }
+        }, SAFETY_MS);
+      });
+      dc.addEventListener("message", (ev) => handleEvent(JSON.parse(ev.data)));
+      dc.addEventListener("close", () => { $("dot").classList.remove("live"); $("callstate").textContent = "Ended"; });
+
+      // SDP exchange straight to Azure using the ephemeral token.
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      let answer;
+      try {
+        const sdpResp = await fetch(sess.webrtc_url, {
+          method: "POST",
+          body: offer.sdp,
+          headers: { Authorization: `Bearer ${sess.token}`, "Content-Type": "application/sdp" },
+        });
+        if (!sdpResp.ok) throw new Error(`SDP ${sdpResp.status}: ${await sdpResp.text()}`);
+        answer = await sdpResp.text();
+      } catch (e) {
+        setStatus("WebRTC error: " + e.message); cleanup(); startBtn.disabled = false; return;
+      }
+      await pc.setRemoteDescription({ type: "answer", sdp: answer });
+    }
+
+    function handleEvent(e) {
+      switch (e.type) {
+        case "response.output_audio_transcript.delta": {
+          // Agent speaking — stream into the current bubble.
+          if (!agentMsgEl) { agentMsgEl = addMsg("agent", "", elapsed()); agentBuffer = ""; }
+          agentBuffer += e.delta || "";
+          agentMsgEl.textContent = agentBuffer;
+          $("transcript").scrollTop = $("transcript").scrollHeight;
+          break;
+        }
+        case "response.output_audio_transcript.done": {
+          const text = e.transcript || agentBuffer;
+          if (agentMsgEl) agentMsgEl.textContent = text;
+          else addMsg("agent", text, elapsed());
+          entries.push({ role: "agent", text, tSec: elapsed(), at: new Date().toISOString() });
+          window.RapportSentiment?.noteUtterance("agent", text, elapsed());
+          agentMsgEl = null; agentBuffer = "";
+          break;
+        }
+        case "conversation.item.input_audio_transcription.completed": {
+          // Human's turn was transcribed.
+          const text = (e.transcript || "").trim();
+          if (text) {
+            addMsg("user", text, elapsed());
+            entries.push({ role: "user", text, tSec: elapsed(), at: new Date().toISOString() });
+            window.RapportSentiment?.noteUtterance("user", text, elapsed());
+          }
+          break;
+        }
+        case "response.function_call_arguments.done": {
+          // The agent decided to hang up. Capture why, but let its goodbye play out.
+          if (e.name === "end_call") {
+            let args = {};
+            try { args = JSON.parse(e.arguments || "{}"); } catch {}
+            callOutcome = { outcome: args.outcome || "other", summary: args.summary || "" };
+            endedBy = "agent";
+            pendingEnd = true;
+            setStatus(`Agent is wrapping up (${callOutcome.outcome})…`);
+          }
+          break;
+        }
+        case "response.done":
+          // After the agent finishes the turn that requested the hang-up, end the call
+          // (small grace so the spoken sign-off finishes playing).
+          if (pendingEnd && !ending) {
+            pendingEnd = false;
+            setTimeout(() => { if (!ending) endCall(); }, 1500);
+          }
+          break;
+        case "error":
+        case "session.error":
+          setStatus("Realtime error: " + JSON.stringify(e.error || e));
+          break;
+      }
+    }
+
+    async function endCall() {
+      if (ending) return;
+      ending = true;
+      endBtn.disabled = true;
+      const duration = elapsed();
+      cleanup();
+      $("dot").classList.remove("live"); $("callstate").textContent = "Ended";
+      setStatus("Saving transcript…");
+      try {
+        const r = await fetch("/transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            campaign: campaign(),
+            started_at: new Date(callStartMs || Date.now()).toISOString(),
+            duration_sec: duration,
+            entries,
+            ended_by: endedBy,
+            call_outcome: callOutcome,
+            sentiment: window.RapportSentiment?.getTrack?.() || [],
+          }),
+        });
+        const data = await r.json();
+        setStatus(`Saved ${data.saved} — ${data.entries} turns. Ready for sentiment analysis.`);
+      } catch (e) {
+        setStatus("Could not save transcript: " + e.message);
+      }
+      startBtn.disabled = false;
+    }
+
+    function cleanup() {
+      window.RapportSentiment?.stop();
+      if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+      if (dc) { try { dc.close(); } catch {} dc = null; }
+      if (pc) { try { pc.close(); } catch {} pc = null; }
+      if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+      if (audioEl) { audioEl.remove(); audioEl = null; }
+    }
+
+    startBtn.addEventListener("click", startCall);
+    endBtn.addEventListener("click", endCall);
+  </script>
+
+  <!-- Sentiment overlay: face-api.js (UMD global) then our module. -->
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <script type="module" src="/static/sentiment.js"></script>
+</body>
+</html>
