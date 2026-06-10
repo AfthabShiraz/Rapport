@@ -17,8 +17,8 @@ export default function EngagementChart({ perCallEngagement }) {
     datasets: [
       {
         data: perCallEngagement,
-        borderColor: '#2b2622',
-        backgroundColor: 'rgba(43,38,34,0.07)',
+        borderColor: '#e6dccd',
+        backgroundColor: 'rgba(230,220,205,0.08)',
         fill: true,
         tension: 0.3,
         pointRadius: 0,
@@ -26,13 +26,15 @@ export default function EngagementChart({ perCallEngagement }) {
       },
     ],
   }
+  const tick = '#b0a596'
+  const gridColor = 'rgba(255,255,255,0.06)'
   const options = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      x: { ticks: { maxTicksLimit: 10 }, grid: { display: false } },
-      y: { min: 0, max: 10, ticks: { maxTicksLimit: 6 }, grid: { color: 'rgba(0,0,0,0.04)' } },
+      x: { ticks: { maxTicksLimit: 10, color: tick }, grid: { display: false } },
+      y: { min: 0, max: 10, ticks: { maxTicksLimit: 6, color: tick }, grid: { color: gridColor } },
     },
   }
   return (

@@ -181,7 +181,7 @@ export default function SetupPage() {
 
         <Section title="Learning status">
           <div className="flex items-center gap-2 text-sm">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-700 px-2.5 py-0.5 text-xs font-semibold">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 text-emerald-300 px-2.5 py-0.5 text-xs font-semibold">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               active
             </span>
@@ -211,7 +211,7 @@ export default function SetupPage() {
             >
               {saving ? 'Saving…' : 'Save & deploy agent'}
             </button>
-            {savedAt && <span className="text-xs font-medium text-emerald-600">deployed ✓</span>}
+            {savedAt && <span className="text-xs font-medium text-emerald-400">deployed ✓</span>}
           </div>
           <StartCallControl agentId={agentId} inputRef={startInputRef} defaultName="James Thornton" />
         </div>

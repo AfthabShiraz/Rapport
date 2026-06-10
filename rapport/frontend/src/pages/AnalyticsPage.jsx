@@ -98,7 +98,7 @@ export default function AnalyticsPage() {
                   <span
                     className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                       o.engagement_lift
-                        ? 'bg-emerald-50 text-emerald-700'
+                        ? 'bg-emerald-500/15 text-emerald-300'
                         : 'bg-cream-deep text-ink-soft'
                     }`}
                   >

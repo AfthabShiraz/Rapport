@@ -42,7 +42,7 @@ export default function StatCards({ analytics }) {
         <div key={c.label} className="rounded-2xl border border-line bg-surface p-4 shadow-card">
           <div className="text-[11px] font-medium uppercase tracking-wide text-ink-faint mb-1.5">{c.label}</div>
           <div className="text-2xl font-extrabold tracking-tight text-ink">{c.value}</div>
-          {c.sub && <div className="text-xs font-medium text-emerald-600 mt-1">{c.sub}</div>}
+          {c.sub && <div className="text-xs font-medium text-emerald-400 mt-1">{c.sub}</div>}
         </div>
       ))}
     </div>

@@ -147,13 +147,27 @@ async def generate_diagnosis(payload: str):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a sales call analyst. Given the transcript, sentiment "
-                    "timeline, scores, and the agent's prior call history, identify the 1-3 "
-                    "most impactful failures. Cite timestamps. Reference cross-call patterns "
-                    "when the history supports them. before_behavior is a short snippet of how "
-                    "the agent currently behaves; after_behavior is a concrete, prompt-ready "
-                    "instruction for how it should behave instead (specific reframes, social "
-                    "proof, scarcity, next-step anchoring). Return JSON only: "
+                    "content": "You are a sales call analyst. You are given the transcript, a "
+                    "vision sentiment timeline, SCRIPT SEGMENT PERFORMANCE (each agent line "
+                    "paired with the prospect's MEASURED facial and vocal valence reaction to "
+                    "it), scores, and the agent's prior call history. The sentiment is measured "
+                    "from the prospect's face and voice — treat it as ground truth for how each "
+                    "part of the script actually landed. Cross-reference WHAT was said (the "
+                    "topics, claims and phrasing in each agent_line) with the reaction it drew, "
+                    "so you learn what to BRING UP MORE and what to AVOID. Identify the 1-3 most "
+                    "impactful failures, anchored to the segments with the most negative measured "
+                    "reaction (say which line/topic caused the drop and what it should have done). "
+                    "EVERY diagnosis item MUST cite the measured reaction that evidences it — the "
+                    "face/voice valence or engagement/posture numbers at that moment, not just what "
+                    "was said. Do not raise a transcript-only complaint that the sentiment data "
+                    "does not support. Cite timestamps. Reference cross-call patterns when the "
+                    "history supports them. "
+                    "before_behavior is a short snippet of how the agent currently behaves; "
+                    "after_behavior is a concrete, prompt-ready instruction that BOTH reinforces "
+                    "the topics/moves that lifted the prospect's sentiment (do more of these) AND "
+                    "fixes or drops the ones that cooled it (specific reframes, social proof, "
+                    "scarcity, next-step anchoring; name topics to lead with and topics to steer "
+                    "away from). Return JSON only: "
                     '{ "diagnosis": [{"title": str, "detail": str, "timestamp": str}], '
                     '"before_behavior": str, "after_behavior": str }',
                 },

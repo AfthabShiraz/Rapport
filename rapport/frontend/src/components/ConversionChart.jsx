@@ -43,17 +43,19 @@ export default function ConversionChart({ perCallConverted, optIndices }) {
       },
     ],
   }
+  const tick = '#b0a596'
+  const gridColor = 'rgba(255,255,255,0.06)'
   const options = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      x: { ticks: { maxTicksLimit: 10 }, grid: { display: false } },
+      x: { ticks: { maxTicksLimit: 10, color: tick }, grid: { display: false } },
       y: {
         min: 0,
         suggestedMax: 50,
-        ticks: { callback: (v) => `${v}%`, maxTicksLimit: 5 },
-        grid: { color: 'rgba(0,0,0,0.04)' },
+        ticks: { callback: (v) => `${v}%`, maxTicksLimit: 5, color: tick },
+        grid: { color: gridColor },
       },
     },
   }

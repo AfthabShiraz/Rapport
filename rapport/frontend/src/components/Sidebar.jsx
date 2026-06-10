@@ -12,7 +12,7 @@ export default function Sidebar() {
     <aside className="w-[212px] shrink-0 border-r border-line bg-surface px-3 py-5 flex flex-col gap-1">
       <div className="px-3 pb-5">
         <div className="flex items-center gap-2">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-coral text-surface text-base font-bold leading-none">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-coral text-white text-base font-bold leading-none">
             R
           </span>
           <span className="text-lg font-bold tracking-tight text-ink">Rapport</span>

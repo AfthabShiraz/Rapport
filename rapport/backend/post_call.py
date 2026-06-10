@@ -28,6 +28,60 @@ def _rel_ts(iso_ts, started_at):
         return "00:00"
 
 
+def _fuse_valence(face, voice, engagement):
+    """Same fusion as the live session: face/voice valence + vision engagement."""
+    parts = [v for v in (face, voice) if v is not None]
+    if engagement is not None:
+        parts.append(engagement / 10 * 2 - 1)  # 0..10 -> -1..1
+    return round(statistics.fmean(parts), 2) if parts else None
+
+
+def _segments_from_turns(turns, started_at):
+    """Reconstruct per-agent-line segments + the prospect's MEASURED reaction
+    straight from persisted turns, so the diagnosis has the face/voice/body-language
+    signal even when the live session is already gone (the common case)."""
+    segments = []
+    last_agent = None
+    for t in turns:
+        if t.speaker == "agent":
+            last_agent = t
+        elif t.speaker == "prospect" and last_agent is not None and t.sentiment_json:
+            try:
+                s = json.loads(t.sentiment_json)
+            except json.JSONDecodeError:
+                continue
+            face, voice, eng = s.get("face_valence"), s.get("voice_valence"), s.get("engagement")
+            segments.append(
+                {
+                    "t": _rel_ts(t.timestamp, started_at or t.timestamp),
+                    "agent_line": last_agent.text,
+                    "prospect_response": t.text,
+                    "face_reaction": face,
+                    "voice_reaction": voice,
+                    "engagement": eng,
+                    "emotion": s.get("emotion"),
+                    "posture": s.get("posture"),
+                    "eye_contact": s.get("eye_contact"),
+                    "objection_risk": s.get("objection_risk"),
+                    "fused_valence": _fuse_valence(face, voice, eng),
+                }
+            )
+    return segments
+
+
+def _timeline_from_turns(turns, started_at):
+    """Vision/affect timeline rebuilt from persisted prospect-turn sentiment."""
+    out = []
+    for t in turns:
+        if t.speaker == "prospect" and t.sentiment_json:
+            try:
+                s = json.loads(t.sentiment_json)
+            except json.JSONDecodeError:
+                continue
+            out.append({"t": _rel_ts(t.timestamp, started_at or t.timestamp), **s})
+    return out
+
+
 def _compute_scores(call, turns, db):
     prospect = [t for t in turns if t.speaker == "prospect"]
     engs = []
@@ -102,7 +156,7 @@ def _history_summary(call, db):
     return "\n".join(lines) if lines else "(no previous calls)"
 
 
-def _deterministic_diagnosis(call, turns, scores, sentiment_history):
+def _deterministic_diagnosis(call, turns, scores, sentiment_history, script_feedback=None):
     """Fallback built from real call data when the LLM is unavailable."""
     objection = next(
         (
@@ -120,6 +174,23 @@ def _deterministic_diagnosis(call, turns, scores, sentiment_history):
         None,
     )
     diagnosis = []
+
+    # the script lines that drew the most negative / most positive MEASURED reaction
+    graded = [s for s in (script_feedback or []) if s.get("fused_valence") is not None]
+    worst = min(graded, key=lambda s: s["fused_valence"]) if graded else None
+    best = max(graded, key=lambda s: s["fused_valence"]) if graded else None
+    if worst and worst["fused_valence"] <= 0:
+        diagnosis.append(
+            {
+                "title": "Weakest script moment (measured reaction)",
+                "detail": f'The line "{worst["agent_line"][:50]}" drew the prospect\'s most '
+                f"negative measured reaction (face {worst['face_reaction']}, voice "
+                f"{worst['voice_reaction']}, fused {worst['fused_valence']}) in the "
+                f"{worst['stage']} stage. This part of the script underperforms and needs reworking.",
+                "timestamp": worst["t"],
+            }
+        )
+
     if first_warn:
         diagnosis.append(
             {
@@ -147,16 +218,30 @@ def _deterministic_diagnosis(call, turns, scores, sentiment_history):
             "timestamp": obj_ts,
         }
     )
+    after = (
+        "When the prospect defers or says they need to think about it, do NOT "
+        "release the call. Acknowledge the concern in one sentence, then reframe with social "
+        "proof (e.g. '3 neighbours on your street got quotes last month') and scarcity "
+        "(installation slots are filling up), and offer a low-friction next step: a "
+        "no-obligation survey booking this week. Always anchor a concrete next action."
+    )
+    # sentiment-driven steering: lean into what lifted the prospect, drop what cooled them
+    if best and best["fused_valence"] > 0:
+        after += (
+            f" Lead with the kind of point you made at {best['t']} (\"{best['agent_line'][:50]}\") "
+            "— it measurably lifted the prospect; bring topics like this up earlier and more often."
+        )
+    if worst and worst["fused_valence"] <= 0:
+        after += (
+            f" Steer away from how you handled {worst['t']} (\"{worst['agent_line'][:50]}\") "
+            "— it measurably cooled the prospect; rework or drop that line."
+        )
     return {
         "diagnosis": diagnosis[:3],
         "before_behavior": "When the prospect defers ('"
         + obj_text[:60]
         + "'), the agent accepts it and ends the call politely with no counter.",
-        "after_behavior": "When the prospect defers or says they need to think about it, do NOT "
-        "release the call. Acknowledge the concern in one sentence, then reframe with social "
-        "proof (e.g. '3 neighbours on your street got quotes last month') and scarcity "
-        "(installation slots are filling up), and offer a low-friction next step: a "
-        "no-obligation survey booking this week. Always anchor a concrete next action.",
+        "after_behavior": after,
     }
 
 
@@ -178,8 +263,26 @@ async def _run(call_id: str):
             db.query(Turn).filter(Turn.call_id == call_id).order_by(Turn.turn_number).all()
         )
 
+        # the live session holds the measured multimodal signals: the vision
+        # timeline plus per-agent-line facial/vocal reactions (script_feedback)
+        from call_loop import sessions
+
+        session = sessions.get(call_id)
+        # prefer the live session's window-averaged signals; otherwise rebuild from
+        # the DB (the session is usually already gone by the time this task runs)
+        sentiment_history = (session.sentiment_history if session else None) or _timeline_from_turns(
+            turns, call.started_at
+        )
+        script_feedback = (session.script_feedback if session else None) or _segments_from_turns(
+            turns, call.started_at
+        )
+        fused_vals = [s["fused_valence"] for s in script_feedback if s.get("fused_valence") is not None]
+        face_vals = [s["face_reaction"] for s in script_feedback if s.get("face_reaction") is not None]
+        voice_vals = [s["voice_reaction"] for s in script_feedback if s.get("voice_reaction") is not None]
+
         # 1-2. scores -> persist -> overmind evaluate -> end root span
         scores = _compute_scores(call, turns, db)
+        scores["avg_valence"] = round(statistics.fmean(fused_vals), 2) if fused_vals else 0.0
         call.scores_json = json.dumps(scores)
         db.commit()
 
@@ -195,6 +298,10 @@ async def _run(call_id: str):
                 "prospect_engagement_end": engs[-1] if engs else 0,
                 "call_outcome": 1 if call.outcome == "converted" else 0,
                 "sentiment_delta": scores["sentiment_delta"],
+                # measured-from-face/voice affect, averaged across the script
+                "avg_prospect_valence": round(statistics.fmean(fused_vals), 2) if fused_vals else 0,
+                "avg_face_valence": round(statistics.fmean(face_vals), 2) if face_vals else 0,
+                "avg_voice_valence": round(statistics.fmean(voice_vals), 2) if voice_vals else 0,
             },
         )
         span = root_spans.pop(call_id, None)
@@ -202,10 +309,6 @@ async def _run(call_id: str):
             overmind_client.end_span(span)
 
         # 3. diagnosis (LLM, retry once, deterministic fallback)
-        from call_loop import sessions
-
-        session = sessions.get(call_id)
-        sentiment_history = session.sentiment_history if session else []
         transcript = "\n".join(
             f"[{_rel_ts(t.timestamp, call.started_at or t.timestamp)}] "
             f"{'Agent' if t.speaker == 'agent' else call.prospect_name}: {t.text}"
@@ -213,7 +316,11 @@ async def _run(call_id: str):
         )
         payload = (
             f"TRANSCRIPT:\n{transcript or '(empty)'}\n\n"
-            f"SENTIMENT TIMELINE:\n{json.dumps(sentiment_history) or '[]'}\n\n"
+            f"SENTIMENT TIMELINE (vision):\n{json.dumps(sentiment_history) or '[]'}\n\n"
+            "SCRIPT SEGMENT PERFORMANCE — each agent line paired with the prospect's "
+            "MEASURED facial (face_reaction) and vocal (voice_reaction) valence in [-1,1] "
+            f"and a fused_valence; this is how each part of the script actually landed:\n"
+            f"{json.dumps(script_feedback) or '[]'}\n\n"
             f"SCORES:\n{json.dumps(scores)}\n\n"
             f"PRIOR CALL HISTORY (this agent):\n{_history_summary(call, db)}"
         )
@@ -221,7 +328,7 @@ async def _run(call_id: str):
         if result is None:
             result = await generate_diagnosis(payload)
         if result is None:
-            result = _deterministic_diagnosis(call, turns, scores, sentiment_history)
+            result = _deterministic_diagnosis(call, turns, scores, sentiment_history, script_feedback)
 
         # 4. insert optimization
         opt = Optimization(

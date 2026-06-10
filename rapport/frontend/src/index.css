@@ -1,34 +1,34 @@
 @import "tailwindcss";
 
-/* ── Antler theme ─────────────────────────────────────────────
-   Warm cream surfaces · near-black warm ink · signature coral.
+/* ── Antler theme · dark ───────────────────────────────────────
+   Warm near-black surfaces · light warm ink · signature coral.
    Clean, editorial, modern. */
 @theme {
-  /* surfaces */
-  --color-cream: #f5efe7;
-  --color-cream-deep: #ede4d7;
-  --color-surface: #fffefc;
-  --color-night: #161310;
+  /* surfaces (dark, warm) */
+  --color-cream: #15120f;
+  --color-cream-deep: #1d1815;
+  --color-surface: #211c17;
+  --color-night: #100d0b;
 
-  /* ink */
-  --color-ink: #1a1613;
-  --color-ink-soft: #6f665b;
-  --color-ink-faint: #a39a8c;
+  /* ink (light text) */
+  --color-ink: #f3ece2;
+  --color-ink-soft: #b0a596;
+  --color-ink-faint: #7a6f61;
 
   /* lines */
-  --color-line: #e7ddcd;
-  --color-line-strong: #d8cdb9;
+  --color-line: #2e2820;
+  --color-line-strong: #423a2f;
 
   /* brand — Antler coral */
   --color-coral: #ff5436;
   --color-coral-dark: #e8421f;
-  --color-coral-soft: #ffe8e1;
-  --color-coral-ink: #b8341a;
+  --color-coral-soft: #3a201a;
+  --color-coral-ink: #ff9078;
 
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 
-  --shadow-card: 0 1px 2px rgba(26, 22, 19, 0.04), 0 1px 3px rgba(26, 22, 19, 0.03);
-  --shadow-lift: 0 4px 16px rgba(26, 22, 19, 0.06), 0 1px 2px rgba(26, 22, 19, 0.04);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-lift: 0 8px 28px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 html, body, #root {

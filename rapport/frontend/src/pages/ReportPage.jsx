@@ -141,8 +141,8 @@ export default function ReportPage() {
               <PromptDiff before={opt.before_behavior} after={opt.after_behavior} />
 
               {decided === 'accepted' ? (
-                <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <p className="text-sm text-emerald-700 font-medium">
+                <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                  <p className="text-sm text-emerald-300 font-medium">
                     ✓ Optimization applied — next call will use the updated prompt.
                   </p>
                   <button

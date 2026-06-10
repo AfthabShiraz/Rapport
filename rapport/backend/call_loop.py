@@ -6,6 +6,7 @@ external interaction is wrapped."""
 import asyncio
 import json
 import logging
+import statistics
 import time
 
 from fastapi import WebSocketDisconnect
@@ -61,6 +62,12 @@ class CallSession:
         self.sentiment["face_valence"] = None
         self.sentiment["voice_valence"] = None
         self.sentiment_history = []  # [{t, **sentiment}] for post-call
+        # measured multimodal affect (face + voice), aligned to each agent line so
+        # post-call learning knows which parts of the script actually landed
+        self.affect_buffer = []  # [{t, face, voice}] raw browser samples (mono time)
+        self.script_feedback = []  # per agent line -> prospect's measured reaction
+        self.pending_agent_line = None  # the agent line awaiting a reaction
+        self.last_agent_end_mono = None
         self.latest_frame = None
         self.last_analyzed_frame = None
         self.neg_voice_count = 0
@@ -88,6 +95,30 @@ class CallSession:
     def elapsed_ts(self) -> str:
         s = int(time.monotonic() - self.start_mono)
         return f"{s // 60:02d}:{s % 60:02d}"
+
+    # ----------------------------------------------- multimodal affect helpers
+
+    def _record_affect(self, face, voice):
+        """Buffer one raw browser sample (face XOR voice) against mono time."""
+        self.affect_buffer.append({"t": time.monotonic(), "face": face, "voice": voice})
+        if len(self.affect_buffer) > 4000:
+            del self.affect_buffer[:1000]
+
+    def _affect_window(self, t0, t1):
+        """Average measured face/voice valence the prospect showed in [t0, t1]."""
+        faces = [s["face"] for s in self.affect_buffer if t0 <= s["t"] <= t1 and s["face"] is not None]
+        voices = [s["voice"] for s in self.affect_buffer if t0 <= s["t"] <= t1 and s["voice"] is not None]
+        face = round(statistics.fmean(faces), 2) if faces else None
+        voice = round(statistics.fmean(voices), 2) if voices else None
+        return face, voice
+
+    @staticmethod
+    def _fuse_valence(face, voice, engagement):
+        """Collapse face/voice valence + vision engagement into one [-1,1] score."""
+        parts = [v for v in (face, voice) if v is not None]
+        if engagement is not None:
+            parts.append(engagement / 10 * 2 - 1)  # 0..10 -> -1..1
+        return round(statistics.fmean(parts), 2) if parts else None
 
     async def emit(self, obj):
         try:
@@ -253,6 +284,36 @@ class CallSession:
             await self._try_reconnect()
 
     async def _commit_prospect_turn(self, text):
+        now = time.monotonic()
+        # grade the preceding agent line by the prospect's MEASURED facial/vocal
+        # reaction to it (the window between that line ending and this response)
+        if self.pending_agent_line is not None and self.last_agent_end_mono is not None:
+            face, voice = self._affect_window(self.last_agent_end_mono, now)
+            fused = self._fuse_valence(face, voice, self.sentiment.get("engagement"))
+            self.script_feedback.append(
+                {
+                    "t": self.elapsed_ts(),
+                    "stage": self.stage,
+                    "agent_line": self.pending_agent_line,
+                    "prospect_response": text,
+                    "face_reaction": face,
+                    "voice_reaction": voice,
+                    "engagement": self.sentiment.get("engagement"),
+                    "emotion": self.sentiment.get("emotion"),
+                    "fused_valence": fused,
+                }
+            )
+            self.pending_agent_line = None
+            # live coaching: if the line landed badly on face/voice, tell the agent
+            if fused is not None and fused <= -0.4 and self.realtime.connected:
+                if now - self.flag_last.get("_affect_signal", -1e9) >= FLAG_COOLDOWN_S:
+                    self.flag_last["_affect_signal"] = now
+                    await self.realtime.add_system_note(
+                        "[Live signal] Your last line landed poorly — the prospect's facial "
+                        f"and vocal tone turned negative (valence {fused}). Change tack: "
+                        "acknowledge their reaction, shorten, and ask an open question."
+                    )
+
         turn = self._insert_turn("prospect", text, with_sentiment=True)
         await self.emit({"type": "turn_complete", "turn": turn})
 
@@ -291,6 +352,10 @@ class CallSession:
 
         turn = self._insert_turn("agent", text, with_sentiment=False)
         await self.emit({"type": "turn_complete", "turn": turn})
+
+        # this line is now "on the air" — the prospect's next reaction grades it
+        self.pending_agent_line = text
+        self.last_agent_end_mono = time.monotonic()
 
         if self.objection_turn is not None:
             obj_turn_id, _ = self.objection_turn
@@ -355,8 +420,10 @@ class CallSession:
             return
         if kind == "face":
             self.sentiment["face_valence"] = round(valence, 2)
+            self._record_affect(round(valence, 2), None)
         elif kind == "voice":
             self.sentiment["voice_valence"] = round(valence, 2)
+            self._record_affect(None, round(valence, 2))
             self.neg_voice_count = self.neg_voice_count + 1 if valence <= -0.4 else 0
             if self.neg_voice_count >= 2:
                 await self.flag(

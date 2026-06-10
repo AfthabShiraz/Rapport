@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { endCall, getCall, startCall } from '../api/calls'
-import AgentSpeechBubble from '../components/AgentSpeechBubble'
+import AgentAvatar from '../components/AgentAvatar'
 import EngagementSparkline from '../components/EngagementSparkline'
+import LiveCaption from '../components/LiveCaption'
 import FlagsFeed from '../components/FlagsFeed'
 import MetricBar from '../components/MetricBar'
 import SentimentBadge from '../components/SentimentBadge'
@@ -146,6 +147,24 @@ export default function LiveCallPage() {
     .join('')
     .toUpperCase()
 
+  const firstName = (call?.prospect_name || 'Prospect').split(' ')[0]
+  const agentSpeakingNow = agentSpeaking || audio.playing
+
+  // the latest streaming sentence for the floating caption: prefer whoever is
+  // live (agent speaking / prospect interim), else fall back to the last turn
+  const liveCaption = agentSpeakingNow && agentText
+    ? { label: 'Aria', text: agentText, speaking: true, isAgent: true }
+    : interim
+      ? { label: firstName, text: interim, speaking: true, isAgent: false }
+      : turns.length
+        ? {
+            label: turns[turns.length - 1].speaker === 'agent' ? 'Aria' : firstName,
+            text: turns[turns.length - 1].text,
+            speaking: false,
+            isAgent: turns[turns.length - 1].speaker === 'agent',
+          }
+        : null
+
   return (
     <div className="flex-1 flex min-h-0">
       {/* left pane */}
@@ -162,7 +181,7 @@ export default function LiveCallPage() {
             <span
               className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                 call?.optimized
-                  ? 'bg-emerald-50 text-emerald-700'
+                  ? 'bg-emerald-500/15 text-emerald-300'
                   : 'bg-coral-soft text-coral-ink'
               }`}
             >
@@ -174,39 +193,46 @@ export default function LiveCallPage() {
           </div>
         </div>
 
-        <div className="relative flex-1 min-h-0 bg-[#1a1a1a]">
-          {stream?.getVideoTracks().length > 0 && !mediaError ? (
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="h-24 w-24 rounded-full bg-white/10 flex items-center justify-center text-3xl font-bold text-white/70">
-                {initials}
+        <div className="relative flex-1 min-h-0 bg-night p-3">
+          <div className="flex h-full gap-3">
+            {/* prospect — large webcam tile */}
+            <div className="relative flex-[2.4] min-w-0 overflow-hidden rounded-2xl bg-[#1a1a1a] ring-1 ring-white/5">
+              {stream?.getVideoTracks().length > 0 && !mediaError ? (
+                <video
+                  ref={videoRef}
+                  muted
+                  playsInline
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="h-28 w-28 rounded-full bg-white/10 flex items-center justify-center text-4xl font-bold text-white/70">
+                    {initials}
+                  </div>
+                </div>
+              )}
+              {sentiment && <SentimentBadge emotion={sentiment.emotion} />}
+              {!micEnabledRef.current && !muted && (
+                <div className="absolute top-4 right-4 rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-slate-300">
+                  muted (agent speaking)
+                </div>
+              )}
+              <div className="absolute bottom-3 left-3 z-20 rounded-full bg-black/55 backdrop-blur px-2.5 py-1 text-xs text-slate-200">
+                {call?.prospect_name} · Prospect
               </div>
             </div>
-          )}
-          {sentiment && <SentimentBadge emotion={sentiment.emotion} />}
-          <div className="absolute top-3 right-3 rounded bg-black/55 px-2 py-1 text-xs text-slate-200">
-            {call?.prospect_name} · Prospect
-          </div>
-          {!micEnabledRef.current && !muted && (
-            <div className="absolute bottom-24 right-3 rounded bg-black/55 px-2 py-1 text-[11px] text-slate-300">
-              muted (agent speaking)
-            </div>
-          )}
-          <AgentSpeechBubble speaking={agentSpeaking || audio.playing} text={agentText} />
-        </div>
 
-        <TranscriptFeed
-          turns={turns}
-          interim={interim}
-          flaggedTurnIds={flaggedTurnIds}
-          prospectName={call?.prospect_name}
-        />
+            {/* agent — smaller tile */}
+            <div className="relative flex-1 min-w-0 overflow-hidden rounded-2xl bg-gradient-to-b from-[#211a2e] to-[#14111c] ring-1 ring-white/5 flex items-center justify-center">
+              <AgentAvatar speaking={agentSpeakingNow} name="Aria" />
+              <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-black/45 backdrop-blur px-2.5 py-1 text-xs text-white/90">
+                Aria
+                <span className="rounded bg-violet-500/90 px-1 text-[10px] font-semibold leading-tight">AI</span>
+              </div>
+            </div>
+          </div>
+          {liveCaption && <LiveCaption {...liveCaption} />}
+        </div>
       </div>
 
       {/* right pane */}
@@ -253,7 +279,19 @@ export default function LiveCallPage() {
           <EngagementSparkline points={engHistory} />
         </div>
 
-        <FlagsFeed flags={flags} />
+        <div className="flex max-h-[28%] flex-col">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/40">
+            Live flags
+          </div>
+          <FlagsFeed flags={flags} />
+        </div>
+
+        <TranscriptFeed
+          turns={turns}
+          interim={interim}
+          flaggedTurnIds={flaggedTurnIds}
+          prospectName={call?.prospect_name}
+        />
 
         <div className="flex gap-2 pt-1">
           <button

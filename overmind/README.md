@@ -12,7 +12,23 @@ spec and rewrites it (prompt, tool descriptions, logic) to score higher.
 | The optimizable artifact | `SALES_SYSTEM_PROMPT` in `sales_agent.py` — **the same prompt the live voice call uses** (`app.py` imports it), so an optimized prompt ships to real calls. |
 | A dataset of cases | [`build_dataset.py`](build_dataset.py) turns real saved calls (with `analysis.py` sentiment) into scenarios; hard real calls become the test cases. |
 | A policy | [`policies.md`](policies.md) — the sales policy (honesty, structure, no pushiness). |
-| An eval spec | [`eval_spec.json`](eval_spec.json) — score = objective hit + LLM-judged call quality. |
+| An eval spec | [`eval_spec.json`](eval_spec.json) — composite score (see below). |
+
+## What we optimize for
+
+`run()` returns three signals and the composite score weights them:
+
+| Signal (`response.*`) | Weight | What it is |
+| --- | --- | --- |
+| `deal_score` | **0.60** | 1.0 deal closed · 0.5 next step agreed · 0.0 otherwise. Closing dominates. |
+| `final_sentiment` | 0.25 | Customer's sentiment **at the end of the call** (−1..+1). |
+| `overall_sentiment` | 0.15 | Customer's sentiment across the whole call (−1..+1). |
+
+`composite = 0.60·deal_score + 0.25·norm(final) + 0.15·norm(overall) − policy_penalties`,
+where `norm(x) = (x+1)/2`. Since the simulation has no webcam/mic, sentiment is
+measured by a text-sentiment pass (`_score_sentiment` in `sales_agent.py`) — the
+simulation's analog of the live multimodal track. Policy violations (dishonesty,
+pushiness, ignoring a "no") are hard penalties.
 
 Why a simulation: a live mic call can't sit inside an optimization loop, so `run()`
 plays the call as text (Azure chat on both sides). The customer is seeded with the

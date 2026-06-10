@@ -1,6 +1,6 @@
 function Card({ label, value, sub, tone }) {
   const toneCls =
-    tone === 'red' ? 'text-coral-ink' : tone === 'amber' ? 'text-amber-600' : 'text-emerald-600'
+    tone === 'red' ? 'text-coral-ink' : tone === 'amber' ? 'text-amber-400' : 'text-emerald-400'
   return (
     <div className="rounded-2xl border border-line bg-surface p-4 shadow-card">
       <div className="text-[11px] font-medium uppercase tracking-wide text-ink-faint mb-1.5">{label}</div>
